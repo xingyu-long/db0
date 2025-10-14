@@ -103,7 +103,8 @@ impl MemTable {
     /// In week 2, day 6, also flush the data to WAL.
     /// In week 3, day 5, modify the function to use the batch API.
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
-        self.map.insert(Bytes::copy_from_slice(_key), Bytes::copy_from_slice(_value));
+        self.map
+            .insert(Bytes::copy_from_slice(_key), Bytes::copy_from_slice(_value));
         Ok(())
     }
 
