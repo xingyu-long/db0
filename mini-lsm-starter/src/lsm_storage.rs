@@ -308,6 +308,16 @@ impl LsmStorageInner {
             return Ok(Some(val));
         }
 
+        // check the imm_memtables too
+        for imm_table in guard.imm_memtables.iter() {
+            if let Some(val) = imm_table.get(_key) {
+                if val.is_empty() {
+                    return Ok(None);
+                }
+                return Ok(Some(val));
+            }
+        }
+
         Ok(None)
     }
 
