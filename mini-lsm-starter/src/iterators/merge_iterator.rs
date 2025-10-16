@@ -70,13 +70,20 @@ impl<I: StorageIterator> MergeIterator<I> {
 
         let mut heap = BinaryHeap::new();
 
+        // TODO(xingyu): what if all iters are invalid.
+        if iters.iter().all(|x| !x.is_valid()) {
+            let mut iters = iters;
+            return Self {
+                iters: heap,
+                current: Some(HeapWrapper(0, iters.pop().unwrap())),
+            };
+        }
+
         for (idx, iter) in iters.into_iter().enumerate() {
             if iter.is_valid() {
                 heap.push(HeapWrapper(idx, iter));
             }
         }
-
-        // TODO(xingyu): what if all iters are invalid.
 
         let current = heap.pop().unwrap();
         Self {
