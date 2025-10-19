@@ -33,6 +33,7 @@ use crate::key::{KeyBytes, KeySlice};
 use crate::lsm_storage::BlockCache;
 
 use self::bloom::Bloom;
+use bytes::BufMut;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockMeta {
@@ -44,21 +45,46 @@ pub struct BlockMeta {
     pub last_key: KeyBytes,
 }
 
+// -------------------------------------------------------------------------------------------
+// |         Block Section         |          Meta Section         |          Extra          |
+// -------------------------------------------------------------------------------------------
+// | data block | ... | data block |            metadata           | meta block offset (u32) |
+// -------------------------------------------------------------------------------------------
+
+// | offset | first_key_len| first_key | last_key_len | last_key |
 impl BlockMeta {
     /// Encode block meta to a buffer.
     /// You may add extra fields to the buffer,
     /// in order to help keep track of `first_key` when decoding from the same buffer in the future.
-    pub fn encode_block_meta(
-        block_meta: &[BlockMeta],
-        #[allow(clippy::ptr_arg)] // remove this allow after you finish
-        buf: &mut Vec<u8>,
-    ) {
-        unimplemented!()
+    pub fn encode_block_meta(block_meta: &[BlockMeta], buf: &mut Vec<u8>) {
+        // TODO(xingyu): improve this by acquiring buffer pool with a calculated size;
+        for meta_data in block_meta.iter() {
+            let first_key_len = meta_data.first_key.len();
+            let last_key_len = meta_data.last_key.len();
+            buf.put_u32(meta_data.offset as u32);
+            buf.put_u16(first_key_len as u16);
+            buf.put(meta_data.first_key.raw_ref());
+            buf.put_u16(last_key_len as u16);
+            buf.put(meta_data.last_key.raw_ref());
+        }
     }
 
     /// Decode block meta from a buffer.
-    pub fn decode_block_meta(buf: impl Buf) -> Vec<BlockMeta> {
-        unimplemented!()
+    pub fn decode_block_meta(mut buf: impl Buf) -> Vec<BlockMeta> {
+        let mut meta_data_blocks = Vec::new();
+        while buf.has_remaining() {
+            let offset = buf.get_u32() as usize;
+            let first_key_len = buf.get_u16() as usize;
+            let first_key = buf.copy_to_bytes(first_key_len);
+            let last_key_len = buf.get_u16() as usize;
+            let last_key = buf.copy_to_bytes(last_key_len);
+            meta_data_blocks.push(BlockMeta {
+                offset: offset,
+                first_key: KeyBytes::from_bytes(first_key),
+                last_key: KeyBytes::from_bytes(last_key),
+            });
+        }
+        meta_data_blocks
     }
 }
 
