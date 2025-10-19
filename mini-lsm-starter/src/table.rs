@@ -153,7 +153,10 @@ impl SsTable {
         let raw_meta_offset = file.read(file.size() - SIZEOF_U32 as u64, SIZEOF_U32 as u64)?;
         let meta_offset = (&raw_meta_offset[..]).get_u32();
         // here is the len, it's not the end.
-        let raw_meta = file.read(meta_offset as u64, file_len - SIZEOF_U32 as u64 - meta_offset as u64)?;
+        let raw_meta = file.read(
+            meta_offset as u64,
+            file_len - SIZEOF_U32 as u64 - meta_offset as u64,
+        )?;
         let block_meta = BlockMeta::decode_block_meta(&raw_meta[..]);
         Ok(SsTable {
             id: id,
@@ -190,7 +193,16 @@ impl SsTable {
 
     /// Read a block from the disk.
     pub fn read_block(&self, block_idx: usize) -> Result<Arc<Block>> {
-        unimplemented!()
+        let offset = self.block_meta[block_idx].offset;
+        let offset_end = self
+            .block_meta
+            .get(block_idx + 1)
+            .map_or(self.block_meta_offset, |x| x.offset);
+        let raw_block = self
+            .file
+            .read(offset as u64, (offset_end - offset) as u64)?;
+        let block = Block::decode(&raw_block[..]);
+        Ok(Arc::new(block))
     }
 
     /// Read a block from disk, with block cache. (Day 4)
