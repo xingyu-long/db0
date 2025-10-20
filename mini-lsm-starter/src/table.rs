@@ -218,18 +218,28 @@ impl SsTable {
         let mut left = 0 as usize;
         let mut right = self.block_meta.len() - 1;
 
+        // find the first key which key > target and we subtract by 1,
+        // so we make sure target might be exist from there.
         while left + 1 < right {
             let mid = left + (right - left) / 2;
-            if self.block_meta[mid].first_key.as_key_slice() >= key {
+            if self.block_meta[mid].first_key.as_key_slice() > key {
                 right = mid;
             } else {
                 left = mid;
             }
         }
-        if self.block_meta[left].first_key.as_key_slice() >= key {
-            return left;
+        if self.block_meta[left].first_key.as_key_slice() > key {
+            // use saturating_sub to prevent "attempt to subtract with overflow"
+            return left.saturating_sub(1);
+        }
+        if self.block_meta[right].first_key.as_key_slice() > key {
+            return right.saturating_sub(1);
         }
         return right;
+
+        // self.block_meta
+        //     .partition_point(|meta| meta.first_key.as_key_slice() <= key)
+        //     .saturating_sub(1)
     }
 
     /// Get number of data blocks.
