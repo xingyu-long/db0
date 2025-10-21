@@ -39,7 +39,7 @@ use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
 use crate::mem_table::{self, MemTable, map_bound};
 use crate::mvcc::LsmMvccInner;
-use crate::table::{SsTable, SsTableIterator};
+use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
 pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 
@@ -276,6 +276,10 @@ impl LsmStorageInner {
             CompactionOptions::NoCompaction => CompactionController::NoCompaction,
         };
 
+        if !path.exists() {
+            std::fs::create_dir(path)?;
+        }
+
         let storage = Self {
             state: Arc::new(RwLock::new(Arc::new(state))),
             state_lock: Mutex::new(()),
@@ -448,7 +452,41 @@ impl LsmStorageInner {
 
     /// Force flush the earliest-created immutable memtable to disk
     pub fn force_flush_next_imm_memtable(&self) -> Result<()> {
-        unimplemented!()
+        let _state_lock = self.state_lock.lock();
+
+        let flush_memtable;
+
+        {
+            let guard = self.state.read();
+            flush_memtable = guard
+                .imm_memtables
+                .last()
+                .expect("no imm_memtable!")
+                .clone();
+        }
+
+        // genereate sstables
+        let mut builder = SsTableBuilder::new(self.options.block_size);
+        flush_memtable.flush(&mut builder)?;
+        let sst_id = flush_memtable.id();
+        let sstable = Arc::new(builder.build(sst_id, None, self.path_of_sst(sst_id))?);
+
+        // update internal state, i.e., l0_sstables, sstables and also remove the
+        // imm_memtables.last()
+        {
+            let mut guard = self.state.write();
+            let mut snapshot = guard.as_ref().clone();
+            let mem = snapshot.imm_memtables.pop().unwrap();
+            assert_eq!(mem.id(), sst_id);
+            snapshot.l0_sstables.insert(0, sst_id);
+            println!("flushed {}.sst with size={}", sst_id, sstable.table_size());
+            snapshot.sstables.insert(sst_id, sstable);
+
+            // update guard
+            *guard = Arc::new(snapshot);
+        }
+
+        Ok(())
     }
 
     pub fn new_txn(&self) -> Result<()> {
