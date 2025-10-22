@@ -347,9 +347,18 @@ impl LsmStorageInner {
                 sstable.first_key().raw_ref(),
                 sstable.last_key().raw_ref(),
             ) {
-                let iter =
-                    SsTableIterator::create_and_seek_to_key(sstable, KeySlice::from_slice(_key))?;
-                sstable_iters.push(Box::new(iter));
+                if let Some(bloom) = sstable.bloom.as_ref() {
+                    sstable_iters.push(Box::new(SsTableIterator::create_and_seek_to_key(
+                        sstable,
+                        KeySlice::from_slice(_key),
+                    )?));
+                } else {
+                    // in case, we don't have bloom, we just move forward
+                    sstable_iters.push(Box::new(SsTableIterator::create_and_seek_to_key(
+                        sstable,
+                        KeySlice::from_slice(_key),
+                    )?));
+                }
             }
         }
 

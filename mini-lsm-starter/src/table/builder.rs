@@ -138,8 +138,7 @@ impl SsTableBuilder {
             first_key: self.meta.first().unwrap().first_key.clone(),
             last_key: self.meta.last().unwrap().last_key.clone(),
             block_meta: self.meta,
-            // ignore these two for now
-            bloom: None,
+            bloom: Some(bloom),
             max_ts: 0,
         })
     }
