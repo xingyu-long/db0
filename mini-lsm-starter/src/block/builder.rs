@@ -19,7 +19,7 @@ use crate::{
     block::SIZEOF_U16,
     key::{KeySlice, KeyVec},
 };
-use bytes::{BufMut, Bytes};
+use bytes::BufMut;
 
 use super::Block;
 

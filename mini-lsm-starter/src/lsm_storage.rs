@@ -23,7 +23,6 @@ use std::sync::atomic::AtomicUsize;
 
 use anyhow::Result;
 use bytes::Bytes;
-use nom::AsBytes;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
 use crate::block::Block;
@@ -37,7 +36,7 @@ use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::key::KeySlice;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
-use crate::mem_table::{self, MemTable, map_bound};
+use crate::mem_table::{MemTable, map_bound};
 use crate::mvcc::LsmMvccInner;
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 

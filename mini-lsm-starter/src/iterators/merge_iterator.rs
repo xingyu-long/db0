@@ -20,7 +20,6 @@ use std::collections::BinaryHeap;
 use std::collections::binary_heap::PeekMut;
 
 use anyhow::Result;
-use bytes::Bytes;
 
 use crate::key::KeySlice;
 
