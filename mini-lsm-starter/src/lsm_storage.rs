@@ -338,52 +338,56 @@ impl LsmStorageInner {
             }
         }
 
-        let mut sstable_iters = Vec::new();
-        // check the sstables
-        for sst_id in snapshot.l0_sstables.iter() {
-            let sstable = snapshot.sstables[sst_id].clone();
+        // a convenient function to check if key might be in SST.
+        let is_valid_table = |_key: &[u8], sstable: &SsTable| -> bool {
             if Self::key_within(
                 _key,
                 sstable.first_key().raw_ref(),
                 sstable.last_key().raw_ref(),
             ) {
                 if let Some(bloom) = sstable.bloom.as_ref() {
-                    sstable_iters.push(Box::new(SsTableIterator::create_and_seek_to_key(
-                        sstable,
-                        KeySlice::from_slice(_key),
-                    )?));
+                    if bloom.may_contain(farmhash::fingerprint32(_key)) {
+                        return true;
+                    }
                 } else {
                     // in case, we don't have bloom, we just move forward
-                    sstable_iters.push(Box::new(SsTableIterator::create_and_seek_to_key(
-                        sstable,
-                        KeySlice::from_slice(_key),
-                    )?));
+                    return true;
                 }
             }
-        }
+            false
+        };
 
-        // we don't need to walk through all items since we only care if the first key is _key
-        let l0_iter = MergeIterator::create(sstable_iters);
-        if l0_iter.is_valid()
-            && l0_iter.key() == KeySlice::from_slice(_key)
-            && !l0_iter.value().is_empty()
-        {
-            return Ok(Some(Bytes::copy_from_slice(l0_iter.value())));
+        let mut l0_iters = Vec::with_capacity(snapshot.l0_sstables.len());
+        // check the sstables
+        for sst_id in snapshot.l0_sstables.iter() {
+            let sstable = snapshot.sstables[sst_id].clone();
+            if is_valid_table(_key, &sstable) {
+                l0_iters.push(Box::new(SsTableIterator::create_and_seek_to_key(
+                    sstable,
+                    KeySlice::from_slice(_key),
+                )?));
+            }
         }
 
         let mut l1_ssts_to_concat = Vec::with_capacity(snapshot.levels[0].1.len());
         for sst_id in snapshot.levels[0].1.iter() {
-            l1_ssts_to_concat.push(snapshot.sstables[sst_id].clone());
+            let sstable = snapshot.sstables[sst_id].clone();
+            if is_valid_table(_key, &sstable) {
+                l1_ssts_to_concat.push(sstable);
+            }
         }
-        let l1_iter = SstConcatIterator::create_and_seek_to_key(
-            l1_ssts_to_concat,
-            KeySlice::from_slice(_key),
+
+        let iter = TwoMergeIterator::create(
+            MergeIterator::create(l0_iters),
+            SstConcatIterator::create_and_seek_to_key(
+                l1_ssts_to_concat,
+                KeySlice::from_slice(_key),
+            )?,
         )?;
-        if l1_iter.is_valid()
-            && l1_iter.key() == KeySlice::from_slice(_key)
-            && !l1_iter.key().is_empty()
-        {
-            return Ok(Some(Bytes::copy_from_slice(l1_iter.value())));
+
+        // we don't need to walk through all items since we only care if the first key is _key
+        if iter.is_valid() && iter.key() == KeySlice::from_slice(_key) && !iter.value().is_empty() {
+            return Ok(Some(Bytes::copy_from_slice(iter.value())));
         }
 
         Ok(None)
