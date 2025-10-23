@@ -201,11 +201,14 @@ impl LsmStorageInner {
             l0_sstables = snapshot.l0_sstables.clone();
             l1_sstables = snapshot.levels[0].1.clone();
         };
-        let new_ssts = self.compact(&CompactionTask::ForceFullCompaction {
+        let compaction_task = &CompactionTask::ForceFullCompaction {
             l0_sstables: l0_sstables.clone(),
             l1_sstables: l1_sstables.clone(),
-        })?;
+        };
 
+        println!("force full compaction: {:?}", compaction_task);
+
+        let new_ssts = self.compact(compaction_task)?;
         // grab the state lock and update it
         {
             let state_lock = self.state_lock.lock();
