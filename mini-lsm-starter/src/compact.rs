@@ -198,8 +198,8 @@ impl LsmStorageInner {
             l1_sstables = snapshot.levels[0].1.clone();
         };
         let new_ssts = self.compact(&CompactionTask::ForceFullCompaction {
-            l0_sstables,
-            l1_sstables,
+            l0_sstables: l0_sstables.clone(),
+            l1_sstables: l1_sstables.clone(),
         })?;
 
         // grab the state lock and update it
@@ -222,6 +222,11 @@ impl LsmStorageInner {
                 snapshot.sstables.insert(new_sst.sst_id(), new_sst.clone());
             }
             *guard = Arc::new(snapshot);
+        }
+
+        // also remove all old files
+        for sst_id in l0_sstables.iter().chain(l1_sstables.iter()) {
+            std::fs::remove_file(self.path_of_sst(*sst_id))?;
         }
 
         Ok(())
