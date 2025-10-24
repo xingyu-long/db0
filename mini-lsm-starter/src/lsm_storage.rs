@@ -138,6 +138,40 @@ pub enum CompactionFilter {
     Prefix(Bytes),
 }
 
+fn range_overlap(
+    user_lower: Bound<&[u8]>,
+    user_upper: Bound<&[u8]>,
+    table_lower: &[u8],
+    table_upper: &[u8],
+) -> bool {
+    // [table_lower, table_upper] [user_lower]
+    match user_lower {
+        Bound::Included(key) if key > table_upper => {
+            return false;
+        }
+        Bound::Excluded(key) if key >= table_upper => {
+            return false;
+        }
+        _ => {}
+    }
+
+    // [user_lower, user_upper] [table_lower]
+    match user_upper {
+        Bound::Included(key) if table_lower > key => {
+            return false;
+        }
+        Bound::Excluded(key) if table_lower >= key => {
+            return false;
+        }
+        _ => {}
+    }
+    true
+}
+
+fn key_within(user_key: &[u8], table_lower: &[u8], table_upper: &[u8]) -> bool {
+    user_key >= table_lower && user_key <= table_upper
+}
+
 /// The storage interface of the LSM tree.
 pub(crate) struct LsmStorageInner {
     pub(crate) state: Arc<RwLock<Arc<LsmStorageState>>>,
@@ -309,10 +343,6 @@ impl LsmStorageInner {
         compaction_filters.push(compaction_filter);
     }
 
-    fn key_within(user_key: &[u8], table_lower: &[u8], table_upper: &[u8]) -> bool {
-        user_key >= table_lower && user_key <= table_upper
-    }
-
     /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
     pub fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
         let snapshot = {
@@ -340,7 +370,7 @@ impl LsmStorageInner {
 
         // a convenient function to check if key might be in SST.
         let is_valid_table = |_key: &[u8], sstable: &SsTable| -> bool {
-            if Self::key_within(
+            if key_within(
                 _key,
                 sstable.first_key().raw_ref(),
                 sstable.last_key().raw_ref(),
@@ -539,36 +569,6 @@ impl LsmStorageInner {
         Ok(())
     }
 
-    fn range_overlap(
-        user_lower: Bound<&[u8]>,
-        user_upper: Bound<&[u8]>,
-        table_lower: &[u8],
-        table_upper: &[u8],
-    ) -> bool {
-        // [table_lower, table_upper] [user_lower]
-        match user_lower {
-            Bound::Included(key) if key > table_upper => {
-                return false;
-            }
-            Bound::Excluded(key) if key >= table_upper => {
-                return false;
-            }
-            _ => {}
-        }
-
-        // [user_lower, user_upper] [table_lower]
-        match user_upper {
-            Bound::Included(key) if table_lower > key => {
-                return false;
-            }
-            Bound::Excluded(key) if table_lower >= key => {
-                return false;
-            }
-            _ => {}
-        }
-        true
-    }
-
     /// Create an iterator over a range of keys.
     pub fn scan(
         &self,
@@ -592,7 +592,7 @@ impl LsmStorageInner {
         for sst_id in snapshot.l0_sstables.iter() {
             let sstable = snapshot.sstables[sst_id].clone();
             // rule out these impossible ranges
-            if Self::range_overlap(
+            if range_overlap(
                 _lower,
                 _upper,
                 sstable.first_key().raw_ref(),
