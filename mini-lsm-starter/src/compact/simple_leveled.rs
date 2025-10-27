@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::lsm_storage::LsmStorageState;
@@ -133,10 +135,37 @@ impl SimpleLeveledCompactionController {
             snapshot.levels[upper_level - 1].1.clear();
         } else {
             // L0 -> L1
-            // TODO(xingyu): see why do we need this 8dbaf54
-            assert_eq!(_task.upper_level_sst_ids, snapshot.l0_sstables);
-            to_be_removed.extend(&snapshot.l0_sstables);
-            snapshot.l0_sstables.clear();
+            // Q: see why do we need this 8dbaf54
+            // A: this may drop ongoing updates to l0_sstables.
+            // assert_eq!(_task.upper_level_sst_ids, snapshot.l0_sstables);
+            // to_be_removed.extend(&snapshot.l0_sstables);
+            // snapshot.l0_sstables.clear();
+            //
+            // Instead, we should do selective updates, so that memtables->l0 flushes won't be
+            // affected.
+            // e.g.,
+            // [T1] read_lock on snapshot
+            // [T2] generate_compaction_task
+            // [T2.5] imm_memtables -> l0 <--------------- this will change l0_sstables
+            // [T3] perform compaction based on above task
+            //    - extend files_to_remove with l0_sstables
+            //    - clear the l0_sstables
+            //    - this would lost the latest updates!!!!
+            to_be_removed.extend(&_task.upper_level_sst_ids);
+            let mut l0_ssts_compacted = _task
+                .upper_level_sst_ids
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>();
+
+            let new_l0_sstables = snapshot
+                .l0_sstables
+                .iter()
+                .copied()
+                .filter(|x| !l0_ssts_compacted.remove(x))
+                .collect::<Vec<_>>();
+            assert!(l0_ssts_compacted.is_empty());
+            snapshot.l0_sstables = new_l0_sstables;
         }
         assert_eq!(
             _task.lower_level_sst_ids,

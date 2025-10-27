@@ -164,7 +164,11 @@ impl LsmStorageInner {
                 let sst_id = self.next_sst_id();
                 // WARNING: this will take the builder and leave it with None
                 let builder = builder.take().unwrap();
-                let sst = Arc::new(builder.build(sst_id, None, self.path_of_sst(sst_id))?);
+                let sst = Arc::new(builder.build(
+                    sst_id,
+                    Some(self.block_cache.clone()),
+                    self.path_of_sst(sst_id),
+                )?);
                 new_ssts.push(sst);
             }
             iter.next()?;
@@ -330,7 +334,22 @@ impl LsmStorageInner {
 
             let (mut new_snapshot, to_be_removed) = self
                 .compaction_controller
-                .apply_compaction_result(&snapshot, &task, &output, false);
+                // WARN: we need to grab lock here!!!
+                // otherwise, we would see things like this
+                // flushed 0.sst with size=1069497
+                // flushed 1.sst with size=1069586
+                // ...
+                // flushed 2.sst with size=1069518
+                // ...
+                // flushed 2.sst with size=1069518
+                // ...
+                // flushed 2.sst with size=1069518
+                // compaction finished: 2 files removed, 2 files added, output=[17, 19]
+                // flushed 2.sst with size=1069518 <------ this was repeated mutltiple times, which
+                // is incorrect!!!
+                // flushed 3.sst with size=1070533
+                // Also check the comments at SimpleLeveledCompactionController::apply_compaction_result(...)
+                .apply_compaction_result(&self.state.read(), &task, &output, false);
             let mut ssts_to_remove = Vec::with_capacity(to_be_removed.len());
             for file_to_remove in to_be_removed.iter() {
                 let result = new_snapshot.sstables.remove(file_to_remove);
