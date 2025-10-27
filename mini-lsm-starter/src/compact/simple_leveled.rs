@@ -133,6 +133,7 @@ impl SimpleLeveledCompactionController {
             snapshot.levels[upper_level - 1].1.clear();
         } else {
             // L0 -> L1
+            // TODO(xingyu): see why do we need this 8dbaf54
             assert_eq!(_task.upper_level_sst_ids, snapshot.l0_sstables);
             to_be_removed.extend(&snapshot.l0_sstables);
             snapshot.l0_sstables.clear();
