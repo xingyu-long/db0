@@ -46,6 +46,10 @@ impl TieredCompactionController {
         &self,
         _snapshot: &LsmStorageState,
     ) -> Option<TieredCompactionTask> {
+        assert!(
+            _snapshot.l0_sstables.is_empty(),
+            "l0_sstables should be empty when using tiered compaction"
+        );
         // we will start calculation after we reached the num_tiers.
         if _snapshot.levels.len() < self.options.num_tiers {
             return None;
@@ -115,6 +119,11 @@ impl TieredCompactionController {
         _task: &TieredCompactionTask,
         _output: &[usize],
     ) -> (LsmStorageState, Vec<usize>) {
+        assert!(
+            _snapshot.l0_sstables.is_empty(),
+            "l0_sstables should be empty when using tiered compaction"
+        );
+
         let mut snapshot = _snapshot.clone();
 
         // remove _task's levels from snapshot
