@@ -607,11 +607,28 @@ impl LsmStorageInner {
     }
 
     /// Force freeze the current memtable to an immutable memtable
-    pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
+    pub fn force_freeze_memtable(&self, state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
         let memtable_id = self.next_sst_id();
-        let memtable = Arc::new(MemTable::create(memtable_id));
+        let memtable = if self.options.enable_wal {
+            Arc::new(MemTable::create_with_wal(
+                memtable_id,
+                self.path_of_wal(memtable_id),
+            )?)
+        } else {
+            Arc::new(MemTable::create(memtable_id))
+        };
 
-        self.freeze_memtable_with_memtable(memtable)
+        self.freeze_memtable_with_memtable(memtable)?;
+
+        // also record NewMemtable behavior into manifest
+        self.manifest.as_ref().unwrap().add_record(
+            state_lock_observer,
+            ManifestRecord::NewMemtable(memtable_id),
+        )?;
+
+        // TODO(xingyu): why do we need sync here?
+        self.sync_dir()?;
+        Ok(())
     }
 
     pub fn freeze_memtable_with_memtable(&self, memtable: Arc<MemTable>) -> Result<()> {
