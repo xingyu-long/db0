@@ -244,6 +244,12 @@ impl MiniLsm {
                 self.inner.force_flush_next_imm_memtable()?;
             }
             self.inner.sync_dir()?;
+        } else {
+            // with wal enabled, we don't need to flush memtables and wait for the next compaction
+            // to complete in the future, and the data won't be lost since WAL ensures data
+            // persistency.
+            self.inner.sync()?;
+            self.inner.sync_dir()?;
         }
         Ok(())
     }
