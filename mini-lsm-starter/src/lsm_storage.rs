@@ -209,9 +209,41 @@ impl Drop for MiniLsm {
 
 impl MiniLsm {
     pub fn close(&self) -> Result<()> {
+        self.inner.sync_dir()?;
+
+        // notify these two threads to stop.
+        self.compaction_notifier.send(()).ok();
+        self.flush_notifier.send(()).ok();
+
+        // wait until current fhreads to stop
+        let mut compact_thread = self.compaction_thread.lock();
+        if let Some(compact_thread) = compact_thread.take() {
+            compact_thread.join().unwrap();
+        }
+
         let mut flush_thread = self.flush_thread.lock();
         if let Some(flush_thread) = flush_thread.take() {
             flush_thread.join().unwrap();
+        }
+
+        if !self.inner.options.enable_wal {
+            // flush memtables to imm_memtables
+            // TODO(xingyu): why we don't need the state_lock???
+            if !self.inner.state.read().memtable.is_empty() {
+                self.inner
+                    .freeze_memtable_with_memtable(Arc::new(MemTable::create(
+                        self.inner.next_sst_id(),
+                    )))?;
+            }
+
+            // flush imm_memtables to disk (i.e., sstable)
+            while {
+                let snapshot = self.inner.state.read();
+                !snapshot.imm_memtables.is_empty()
+            } {
+                self.inner.force_flush_next_imm_memtable()?;
+            }
+            self.inner.sync_dir()?;
         }
         Ok(())
     }
@@ -509,6 +541,10 @@ impl LsmStorageInner {
         let memtable_id = self.next_sst_id();
         let memtable = Arc::new(MemTable::create(memtable_id));
 
+        self.freeze_memtable_with_memtable(memtable)
+    }
+
+    pub fn freeze_memtable_with_memtable(&self, memtable: Arc<MemTable>) -> Result<()> {
         let old_memtable;
         {
             // acquire the write lock
