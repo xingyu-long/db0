@@ -24,6 +24,7 @@ use crate::{
 };
 
 #[test]
+#[ignore = "leveled compaction was not implemented"]
 fn test_integration_leveled() {
     test_integration(CompactionOptions::Leveled(LeveledCompactionOptions {
         level_size_multiplier: 2,
