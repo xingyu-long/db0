@@ -61,7 +61,7 @@ impl Manifest {
         file.read_to_end(&mut buf)?;
 
         let mut records = Vec::new();
-        let mut rbuf = buf.iter().as_slice();
+        let mut rbuf = buf.as_slice();
         while rbuf.has_remaining() {
             let record_len = rbuf.get_u32() as usize;
             let raw_record = &rbuf[..record_len];

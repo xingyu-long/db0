@@ -53,7 +53,7 @@ impl Wal {
 
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
-        let mut rbuf = buf.iter().as_slice();
+        let mut rbuf = buf.as_slice();
         while rbuf.has_remaining() {
             let mut checksum_buf = Vec::new();
             let key_len = rbuf.get_u16() as usize;
