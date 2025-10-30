@@ -18,10 +18,10 @@ use std::path::Path;
 use std::sync::Arc;
 use std::{fs::File, io::Write};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+use bytes::{Buf, BufMut};
 use parking_lot::{Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
-use serde_json::Deserializer;
 
 use crate::compact::CompactionTask;
 
@@ -60,10 +60,18 @@ impl Manifest {
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
 
-        let mut stream = Deserializer::from_slice(&buf).into_iter::<ManifestRecord>();
         let mut records = Vec::new();
-        while let Some(record) = stream.next() {
-            records.push(record?);
+        let mut rbuf = buf.iter().as_slice();
+        while rbuf.has_remaining() {
+            let record_len = rbuf.get_u32() as usize;
+            let raw_record = &rbuf[..record_len];
+            let record: ManifestRecord = serde_json::from_slice(raw_record)?;
+            rbuf.advance(record_len);
+            let checksum = rbuf.get_u32();
+            if checksum != crc32fast::hash(raw_record) {
+                bail!("checksum doesn't match!");
+            }
+            records.push(record);
         }
 
         Ok((
@@ -82,9 +90,14 @@ impl Manifest {
         self.add_record_when_init(record)
     }
 
+    // | len | JSON record | checksum | len | JSON record | checksum | len | JSON record | checksum |
     pub fn add_record_when_init(&self, _record: ManifestRecord) -> Result<()> {
-        // what's the format of Manifest?
-        let encoded = serde_json::to_vec(&_record)?;
+        let json_encoded = serde_json::to_vec(&_record)?;
+        let mut encoded = Vec::new();
+        encoded.put_u32(json_encoded.len() as u32);
+        encoded.put(&json_encoded[..]);
+        encoded.put_u32(crc32fast::hash(&json_encoded[..]));
+
         {
             let mut file = self.file.lock();
             file.write(&encoded)?;
