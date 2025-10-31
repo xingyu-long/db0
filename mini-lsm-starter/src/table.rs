@@ -53,7 +53,9 @@ pub struct BlockMeta {
 //                                              |
 //                                              |
 //                                              |
-//                                              |-> | offset for data block | first_key_len| first_key | last_key_len | last_key |
+//                                              |
+//                                              *
+// | offset for data block | first_key_len| first_key | first_key_ts | last_key_len | last_key | last_key_ts |
 impl BlockMeta {
     /// Encode block meta to a buffer.
     /// You may add extra fields to the buffer,
@@ -64,13 +66,17 @@ impl BlockMeta {
 
         // TODO(xingyu): improve this by acquiring buffer pool with a calculated size;
         for meta_data in block_meta.iter() {
-            let first_key_len = meta_data.first_key.len();
-            let last_key_len = meta_data.last_key.len();
+            let first_key_len = meta_data.first_key.key_len();
+            let last_key_len = meta_data.last_key.key_len();
             buf.put_u32(meta_data.offset as u32);
+
             buf.put_u16(first_key_len as u16);
-            buf.put(meta_data.first_key.raw_ref());
+            buf.put(meta_data.first_key.key_ref());
+            buf.put_u64(meta_data.first_key.ts());
+
             buf.put_u16(last_key_len as u16);
-            buf.put(meta_data.last_key.raw_ref());
+            buf.put(meta_data.last_key.key_ref());
+            buf.put_u64(meta_data.last_key.ts());
         }
 
         // WARN: we shouldn't include the first u32 since it's for number of block_meta
@@ -89,12 +95,16 @@ impl BlockMeta {
             let offset = buf.get_u32() as usize;
             let first_key_len = buf.get_u16() as usize;
             let first_key = buf.copy_to_bytes(first_key_len);
+            let first_key_ts = buf.get_u64();
+
             let last_key_len = buf.get_u16() as usize;
             let last_key = buf.copy_to_bytes(last_key_len);
+            let last_key_ts = buf.get_u64();
+
             meta_data_blocks.push(BlockMeta {
                 offset: offset,
-                first_key: KeyBytes::from_bytes(first_key),
-                last_key: KeyBytes::from_bytes(last_key),
+                first_key: KeyBytes::from_bytes_with_ts(first_key, first_key_ts),
+                last_key: KeyBytes::from_bytes_with_ts(last_key, last_key_ts),
             });
         }
 
