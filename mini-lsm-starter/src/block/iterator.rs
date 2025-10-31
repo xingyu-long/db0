@@ -17,7 +17,7 @@ use std::sync::Arc;
 use bytes::Buf;
 
 use crate::{
-    block::SIZEOF_U16,
+    block::{SIZEOF_U16, SIZEOF_U64},
     key::{KeySlice, KeyVec},
 };
 
@@ -43,7 +43,10 @@ impl Block {
         // for the first key, there is no overlap;
         buf.get_u16();
         let key_len = buf.get_u16();
-        let key = KeyVec::from_vec(buf[..key_len as usize].to_vec());
+        let key_buf = &buf[..key_len as usize];
+        buf.advance(key_len as usize);
+        let ts = (&buf[..SIZEOF_U64]).get_u64();
+        let key = KeyVec::from_vec_with_ts(key_buf.to_vec(), ts);
         key
     }
 }
@@ -123,15 +126,19 @@ impl BlockIterator {
         // so we have advance the cursor explicitly
         entry.advance(key_len);
 
+        // get timestamp
+        let ts = entry.get_u64();
+
         self.key.clear();
         let mut new_key: Vec<u8> = Vec::new();
-        new_key.extend(&self.first_key.raw_ref()[..overlap_len]);
+        new_key.extend(&self.first_key.key_ref()[..overlap_len]);
         new_key.extend(key);
-        self.key = KeyVec::from_vec(new_key);
+        self.key = KeyVec::from_vec_with_ts(new_key, ts);
 
         let value_len = entry.get_u16() as usize;
 
-        let value_start_index = offset + SIZEOF_U16 + SIZEOF_U16 + key_len + SIZEOF_U16;
+        let value_start_index =
+            offset + SIZEOF_U16 + SIZEOF_U16 + key_len + SIZEOF_U16 + SIZEOF_U64;
 
         self.value_range = (value_start_index, value_start_index + value_len);
     }

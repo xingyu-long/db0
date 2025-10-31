@@ -34,8 +34,8 @@ pub struct BlockBuilder {
 
 // return index which means all things before index are same.
 fn compute_overlap(first_key: KeySlice, key: KeySlice) -> usize {
-    let first_key = first_key.raw_ref();
-    let key = key.raw_ref();
+    let first_key = first_key.key_ref();
+    let key = key.key_ref();
     let mut i = 0;
     loop {
         if i >= first_key.len() || i >= key.len() {
@@ -73,7 +73,7 @@ impl BlockBuilder {
     /// You may find the `bytes::BufMut` trait useful for manipulating binary data.
     #[must_use]
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
-        let total_size = self.estimated_size() + key.len() + value.len() + 3 * SIZEOF_U16; /* key_len + value_len + offset */
+        let total_size = self.estimated_size() + key.raw_len() + value.len() + 3 * SIZEOF_U16; /* key_len + value_len + offset */
 
         // for the first calculation this is inaccurate
         // since we don't have data and we shouldn't add SIZEOF_U16 for num_of_elements field
@@ -85,13 +85,14 @@ impl BlockBuilder {
 
         // add key and value
         let overlap = compute_overlap(self.first_key.as_key_slice(), key);
-        // key_overlap_len (u16) | rest_key_len (u16) | key (rest_key_len)
+        // key_overlap_len (u16) | rest_key_len (u16) | key (rest_key_len) | timestamp (u64)
         // example:
         // first_key = mini-something, above keys are 5|3|LSM
         // mini-LSM
         self.data.put_u16(overlap as u16);
-        self.data.put_u16((key.len() - overlap) as u16);
-        self.data.put(&key.raw_ref()[overlap..]);
+        self.data.put_u16((key.key_len() - overlap) as u16);
+        self.data.put(&key.key_ref()[overlap..]);
+        self.data.put_u64(key.ts());
 
         self.data.put_u16(value.len() as u16);
         self.data.put(value);
