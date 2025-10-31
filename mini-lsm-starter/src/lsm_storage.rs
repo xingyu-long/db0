@@ -35,7 +35,7 @@ use crate::iterators::StorageIterator;
 use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
-use crate::key::KeySlice;
+use crate::key::{KeySlice, TS_RANGE_BEGIN};
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::{Manifest, ManifestRecord};
 use crate::mem_table::{MemTable, map_bound};
@@ -519,8 +519,8 @@ impl LsmStorageInner {
         let is_valid_table = |_key: &[u8], sstable: &SsTable| -> bool {
             if key_within(
                 _key,
-                sstable.first_key().raw_ref(),
-                sstable.last_key().raw_ref(),
+                sstable.first_key().key_ref(),
+                sstable.last_key().key_ref(),
             ) {
                 if let Some(bloom) = sstable.bloom.as_ref() {
                     if bloom.may_contain(farmhash::fingerprint32(_key)) {
@@ -541,7 +541,7 @@ impl LsmStorageInner {
             if is_valid_table(_key, &sstable) {
                 l0_iters.push(Box::new(SsTableIterator::create_and_seek_to_key(
                     sstable,
-                    KeySlice::from_slice(_key),
+                    KeySlice::from_slice(_key, TS_RANGE_BEGIN),
                 )?));
             }
         }
@@ -559,7 +559,7 @@ impl LsmStorageInner {
 
             iters_after_l0.push(Box::new(SstConcatIterator::create_and_seek_to_key(
                 ssts_to_concat,
-                KeySlice::from_slice(_key),
+                KeySlice::from_slice(_key, TS_RANGE_BEGIN),
             )?));
         }
 
@@ -568,7 +568,7 @@ impl LsmStorageInner {
         let iter = TwoMergeIterator::create(MergeIterator::create(l0_iters), merge_iter_after_l0)?;
 
         // we don't need to walk through all items since we only care if the first key is _key
-        if iter.is_valid() && iter.key() == KeySlice::from_slice(_key) && !iter.value().is_empty() {
+        if iter.is_valid() && iter.key().key_ref() == _key && !iter.value().is_empty() {
             return Ok(Some(Bytes::copy_from_slice(iter.value())));
         }
 
@@ -779,21 +779,22 @@ impl LsmStorageInner {
             if range_overlap(
                 _lower,
                 _upper,
-                sstable.first_key().raw_ref(),
-                sstable.last_key().raw_ref(),
+                sstable.first_key().key_ref(),
+                sstable.last_key().key_ref(),
             ) {
                 // ensure the _lower for the sstables;
                 let iter = match _lower {
-                    Bound::Included(key) => {
-                        SsTableIterator::create_and_seek_to_key(sstable, KeySlice::from_slice(key))?
-                    }
+                    Bound::Included(key) => SsTableIterator::create_and_seek_to_key(
+                        sstable,
+                        KeySlice::from_slice(key, TS_RANGE_BEGIN),
+                    )?,
                     Bound::Excluded(key) => {
                         let mut temp_iter = SsTableIterator::create_and_seek_to_key(
                             sstable,
-                            KeySlice::from_slice(key),
+                            KeySlice::from_slice(key, TS_RANGE_BEGIN),
                         )?;
 
-                        if temp_iter.is_valid() && temp_iter.key() == KeySlice::from_slice(key) {
+                        if temp_iter.is_valid() && temp_iter.key().key_ref() == key {
                             temp_iter.next()?;
                         }
                         temp_iter
@@ -812,8 +813,8 @@ impl LsmStorageInner {
                 if range_overlap(
                     _lower,
                     _upper,
-                    sstable.first_key().raw_ref(),
-                    sstable.last_key().raw_ref(),
+                    sstable.first_key().key_ref(),
+                    sstable.last_key().key_ref(),
                 ) {
                     ssts_to_concat.push(sstable.clone());
                 }
@@ -821,14 +822,14 @@ impl LsmStorageInner {
             let iter = match _lower {
                 Bound::Included(key) => SstConcatIterator::create_and_seek_to_key(
                     ssts_to_concat,
-                    KeySlice::from_slice(key),
+                    KeySlice::from_slice(key, TS_RANGE_BEGIN),
                 )?,
                 Bound::Excluded(key) => {
                     let mut temp_iter = SstConcatIterator::create_and_seek_to_key(
                         ssts_to_concat,
-                        KeySlice::from_slice(key),
+                        KeySlice::from_slice(key, TS_RANGE_BEGIN),
                     )?;
-                    if temp_iter.is_valid() && temp_iter.key() == KeySlice::from_slice(key) {
+                    if temp_iter.is_valid() && temp_iter.key().key_ref() == key {
                         temp_iter.next()?;
                     }
                     temp_iter
