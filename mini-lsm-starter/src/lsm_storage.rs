@@ -497,24 +497,22 @@ impl LsmStorageInner {
             Arc::clone(&guard)
         };
 
-        if let Some(val) = snapshot.memtable.get(_key) {
-            // deal with tomestone, i.e., b"" (empty case)
-            if val.is_empty() {
-                return Ok(None);
-            }
-            return Ok(Some(val));
-        }
+        // ts-based memtable/imm_memtables retrieve
+        let mut memtable_iters = Vec::with_capacity(snapshot.imm_memtables.len() + 1);
 
-        // check the imm_memtables too
+        memtable_iters.push(Box::new(snapshot.memtable.scan(
+            Bound::Included(KeySlice::from_slice(_key, TS_RANGE_BEGIN)),
+            Bound::Included(KeySlice::from_slice(_key, TS_RANGE_END)),
+        )));
+
         for imm_table in snapshot.imm_memtables.iter() {
-            if let Some(val) = imm_table.get(_key) {
-                if val.is_empty() {
-                    return Ok(None);
-                }
-                return Ok(Some(val));
-            }
+            memtable_iters.push(Box::new(imm_table.scan(
+                Bound::Included(KeySlice::from_slice(_key, TS_RANGE_BEGIN)),
+                Bound::Included(KeySlice::from_slice(_key, TS_RANGE_END)),
+            )));
         }
 
+        let mem_merge_iter = MergeIterator::create(memtable_iters);
         // a convenient function to check if key might be in SST.
         let is_valid_table = |_key: &[u8], sstable: &SsTable| -> bool {
             if key_within(
@@ -565,10 +563,21 @@ impl LsmStorageInner {
 
         let merge_iter_after_l0 = MergeIterator::create(iters_after_l0);
 
-        let iter = TwoMergeIterator::create(MergeIterator::create(l0_iters), merge_iter_after_l0)?;
+        let iter = LsmIterator::new(
+            TwoMergeIterator::create(
+                TwoMergeIterator::create(mem_merge_iter, MergeIterator::create(l0_iters))?,
+                merge_iter_after_l0,
+            )?,
+            Bound::Unbounded,
+        )?;
 
+        // the iter will skip empty value and always return the valid key, even if the key
+        // may doesn't match with _key, but we can have the condition check and ensure the value
+        // it returns, otherwise, we just return None for this _key. (that's why we did
+        // move_to_non_delete() in lsm_iterator)
+        //
         // we don't need to walk through all items since we only care if the first key is _key
-        if iter.is_valid() && iter.key().key_ref() == _key && !iter.value().is_empty() {
+        if iter.is_valid() && iter.key() == _key && !iter.value().is_empty() {
             return Ok(Some(Bytes::copy_from_slice(iter.value())));
         }
 
