@@ -23,7 +23,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::block::SIZEOF_U16;
-use crate::key::KeySlice;
+use crate::key::{KeyBytes, KeySlice};
 
 pub struct Wal {
     file: Arc<Mutex<BufWriter<File>>>,
@@ -43,7 +43,7 @@ impl Wal {
         })
     }
 
-    pub fn recover(_path: impl AsRef<Path>, _skiplist: &SkipMap<Bytes, Bytes>) -> Result<Self> {
+    pub fn recover(_path: impl AsRef<Path>, _skiplist: &SkipMap<KeyBytes, Bytes>) -> Result<Self> {
         let path = _path.as_ref();
         let mut file = OpenOptions::new()
             .read(true)
@@ -59,8 +59,11 @@ impl Wal {
             let key_len = rbuf.get_u16() as usize;
             let key = Bytes::copy_from_slice(&rbuf[..key_len]);
             rbuf.advance(key_len);
+            let ts = rbuf.get_u64();
+
             checksum_buf.put_u16(key_len as u16);
             checksum_buf.put(&key[..]);
+            checksum_buf.put_u64(ts);
 
             let value_len = rbuf.get_u16() as usize;
             let value = Bytes::copy_from_slice(&rbuf[..value_len]);
@@ -73,19 +76,21 @@ impl Wal {
                 bail!("checksum doesn't match!");
             }
 
-            _skiplist.insert(key, value);
+            _skiplist.insert(KeyBytes::from_bytes_with_ts(key, ts), value);
         }
         Ok(Self {
             file: Arc::new(Mutex::new(BufWriter::new(file))),
         })
     }
 
-    // | key_len | key | value_len | value | checksum |
-    pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
+    // | key_len (exclude ts len) (u16) | key | ts (u64) | value_len (u16) | value | checksum (u32) |
+    pub fn put(&self, _key: KeySlice, _value: &[u8]) -> Result<()> {
         let mut file = self.file.lock();
-        let mut buf: Vec<u8> = Vec::with_capacity(SIZEOF_U16 * 2 + _key.len() + _value.len());
-        buf.put_u16(_key.len() as u16);
-        buf.put(_key);
+        let mut buf: Vec<u8> = Vec::with_capacity(SIZEOF_U16 * 2 + _key.raw_len() + _value.len());
+        buf.put_u16(_key.key_len() as u16);
+        buf.put(_key.key_ref());
+        buf.put_u64(_key.ts());
+
         buf.put_u16(_value.len() as u16);
         buf.put(_value);
 
