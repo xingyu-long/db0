@@ -132,34 +132,34 @@ impl LsmStorageInner {
     fn compact_generate_sst_from_iter(
         &self,
         mut iter: impl for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
-        is_lower_level_bottom_level: bool,
+        _is_lower_level_bottom_level: bool,
     ) -> Result<Vec<Arc<SsTable>>> {
         let mut new_ssts = Vec::new();
 
         // also need to handle builder
         let mut builder = None;
+        let mut last_key = Vec::<u8>::new();
 
         while iter.is_valid() {
             if builder.is_none() {
                 builder = Some(SsTableBuilder::new(self.options.block_size));
             }
 
+            let is_same_key = iter.key().key_ref() == &last_key;
             let builder_inner = builder.as_mut().unwrap();
 
-            // if it's in bottom level, we can ignore the empty values
+            // Prior to MVCC: if it's in bottom level, we can ignore the empty values
             // otherwise, we should keep the value even if it's empty
             // since the other lower levels might have some invalid values.
-            if is_lower_level_bottom_level {
-                if !iter.value().is_empty() {
-                    builder_inner.add(iter.key(), iter.value());
-                }
-            } else {
-                builder_inner.add(iter.key(), iter.value());
-            }
+            //
+            // with MVCC: we would need to keep it since another user may have it with older ts
+            builder_inner.add(iter.key(), iter.value());
 
             // Q: Do I need to do control how many ssts we should have here?
             // A: we use self.options.target_sst_size
-            if builder_inner.estimated_size() >= self.options.target_sst_size {
+            // with MVCC: we'd like to put same key in same file even if the size is greater than
+            // target_sst_size
+            if builder_inner.estimated_size() >= self.options.target_sst_size && !is_same_key {
                 // Q: how to get the id?
                 // A: next_sst_id()
                 let sst_id = self.next_sst_id();
@@ -172,6 +172,13 @@ impl LsmStorageInner {
                 )?);
                 new_ssts.push(sst);
             }
+
+            // update the prev_key;
+            if !is_same_key {
+                last_key.clear();
+                last_key.extend(iter.key().key_ref());
+            }
+
             iter.next()?;
         }
 
