@@ -60,7 +60,7 @@ impl BlockMeta {
     /// Encode block meta to a buffer.
     /// You may add extra fields to the buffer,
     /// in order to help keep track of `first_key` when decoding from the same buffer in the future.
-    pub fn encode_block_meta(block_meta: &[BlockMeta], buf: &mut Vec<u8>) {
+    pub fn encode_block_meta(block_meta: &[BlockMeta], max_ts: u64, buf: &mut Vec<u8>) {
         let original_len = buf.len();
         buf.put_u32(block_meta.len() as u32);
 
@@ -84,10 +84,14 @@ impl BlockMeta {
         // WARN: we shouldn't include the first u32 since it's for number of block_meta
         let checksum = crc32fast::hash(&buf[original_len + SIZEOF_U32..]);
         buf.put_u32(checksum);
+
+        // add max_ts at the end
+        buf.put_u64(max_ts);
+
     }
 
     /// Decode block meta from a buffer.
-    pub fn decode_block_meta(mut buf: &[u8]) -> Result<Vec<BlockMeta>> {
+    pub fn decode_block_meta(mut buf: &[u8]) -> Result<(Vec<BlockMeta>, u64)> {
         let mut meta_data_blocks = Vec::new();
 
         let num_block_meta = buf.get_u32();
@@ -114,8 +118,9 @@ impl BlockMeta {
         if checksum != crc32fast::hash(raw_block_meta) {
             bail!("checksum doesn't match!");
         }
+        let max_ts = buf.get_u64();
 
-        Ok(meta_data_blocks)
+        Ok((meta_data_blocks, max_ts))
     }
 }
 
@@ -197,7 +202,7 @@ impl SsTable {
             meta_offset as u64,
             bloom_offset as u64 - SIZEOF_U32 as u64 - meta_offset as u64,
         )?;
-        let block_meta = BlockMeta::decode_block_meta(&raw_meta[..])?;
+        let (block_meta, max_ts) = BlockMeta::decode_block_meta(&raw_meta[..])?;
         Ok(SsTable {
             id: id,
             file: file,
@@ -207,7 +212,7 @@ impl SsTable {
             block_meta: block_meta,
             block_cache: block_cache,
             bloom: Some(bloom),
-            max_ts: 0,
+            max_ts: max_ts,
         })
     }
 

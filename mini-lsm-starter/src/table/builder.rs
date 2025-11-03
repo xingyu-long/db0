@@ -40,6 +40,8 @@ pub struct SsTableBuilder {
     block_size: usize,
     // use it for bloom filter
     key_hashes: Vec<u32>,
+    // record max ts
+    max_ts: u64,
 }
 
 impl SsTableBuilder {
@@ -53,6 +55,7 @@ impl SsTableBuilder {
             meta: Vec::new(),
             block_size: block_size,
             key_hashes: Vec::new(),
+            max_ts: 0,
         }
     }
 
@@ -68,6 +71,10 @@ impl SsTableBuilder {
             self.key_hashes.push(farmhash::fingerprint32(key.key_ref()));
             self.last_key.set_from_slice(key);
             return;
+        }
+
+        if key.ts() > self.max_ts {
+            self.max_ts = key.ts();
         }
 
         self.finish_block();
@@ -130,7 +137,7 @@ impl SsTableBuilder {
         let mut buf = self.data;
         // the meta section is after the block section
         let block_meta_offset = buf.len();
-        BlockMeta::encode_block_meta(&self.meta, &mut buf);
+        BlockMeta::encode_block_meta(&self.meta, self.max_ts, &mut buf);
         buf.put_u32(block_meta_offset as u32);
 
         // add bloom filter right after block_meta
@@ -150,7 +157,7 @@ impl SsTableBuilder {
             last_key: self.meta.last().unwrap().last_key.clone(),
             block_meta: self.meta,
             bloom: Some(bloom),
-            max_ts: 0,
+            max_ts: self.max_ts,
         })
     }
 
