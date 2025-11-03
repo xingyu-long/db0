@@ -357,6 +357,8 @@ impl LsmStorageInner {
             std::fs::create_dir(path)?;
         }
 
+        // record when the last txn committed.
+        let mut last_committed_ts = 0;
         // recover from manifest file
         let manifest_file = path.join("MANIFEST");
         if !manifest_file.exists() {
@@ -421,6 +423,8 @@ impl LsmStorageInner {
                     FileObject::open(&Self::path_of_sst_static(path, sst_id))?,
                 )?;
 
+                last_committed_ts = last_committed_ts.max(sst.max_ts());
+
                 state.sstables.insert(sst_id, Arc::new(sst));
                 sst_count += 1;
                 next_sst_id = next_sst_id.max(sst_id);
@@ -438,8 +442,15 @@ impl LsmStorageInner {
                     let memtable =
                         MemTable::recover_from_wal(*id, Self::path_of_wal_static(path, *id))?;
                     if !memtable.is_empty() {
+                        let max_ts = memtable
+                            .map
+                            .iter()
+                            .map(|entry| entry.key().ts())
+                            .max()
+                            .unwrap_or_default();
                         state.imm_memtables.insert(0, Arc::new(memtable));
                         wal_count += 1;
+                        last_committed_ts = last_committed_ts.max(max_ts);
                     }
                 }
                 println!("{} WALs recovered", wal_count);
@@ -469,7 +480,7 @@ impl LsmStorageInner {
             compaction_controller,
             manifest: Some(manifest),
             options: options.into(),
-            mvcc: Some(LsmMvccInner::new(0)),
+            mvcc: Some(LsmMvccInner::new(last_committed_ts)),
             compaction_filters: Arc::new(Mutex::new(Vec::new())),
         };
 
