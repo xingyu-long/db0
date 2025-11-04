@@ -24,7 +24,7 @@ use crossbeam_skiplist::map::Entry;
 use ouroboros::self_referencing;
 
 use crate::iterators::StorageIterator;
-use crate::key::{KeyBytes, KeySlice, TS_DEFAULT};
+use crate::key::{KeyBytes, KeySlice, TS_DEFAULT, TS_RANGE_BEGIN, TS_RANGE_END};
 use crate::table::SsTableBuilder;
 use crate::wal::Wal;
 
@@ -49,12 +49,51 @@ pub(crate) fn map_bound(bound: Bound<&[u8]>) -> Bound<Bytes> {
 }
 
 /// Create a bound of `KeyBytes` from a bound of `&[u8]` and `u64`.
-pub(crate) fn map_bound_plus_ts(bound: Bound<&[u8]>, ts: u64) -> Bound<KeySlice> {
-    match bound {
-        Bound::Included(x) => Bound::Included(KeySlice::from_slice(x, ts)),
-        Bound::Excluded(x) => Bound::Excluded(KeySlice::from_slice(x, ts)),
-        Bound::Unbounded => Bound::Unbounded,
-    }
+pub(crate) fn map_key_bound_plus_ts<'a>(
+    lower: Bound<&'a [u8]>,
+    upper: Bound<&'a [u8]>,
+    ts: u64,
+) -> (Bound<KeySlice<'a>>, Bound<KeySlice<'a>>) {
+    /*
+
+    See https://github.com/skyzh/mini-lsm/pull/140
+
+    Keys are ordered by (key_bytes, ts) where ts is descending (higher ts first).
+
+        "key1"@100 -> "value1_v100"
+        "key1"@50  -> "value1_v50"
+        "key1"@10  -> "value1_v10"
+        "key2"@200 -> "value2_v200"
+        "key2"@100 -> "value2_v100"
+        "key3"@50  -> "value3_v50"
+
+        Example 1: Lower bound with Bound::Included("key1") and ts = 75 => Bound::Included(KeySlice::from_slice("key1", 75))
+            so we'd like to everything after key1@75, => "key1"@50, "key1"@10, "key2"@200, "key2"@100, "key3"@50
+
+        Example 2: Lower bound with Bound::Excluded("key1") and any ts => Bound::Excluded(KeySlice::from_slice("key1", TS_RANGE_END)) => Bound::Excluded("key1"@0)
+            so we'd like to exclude all key1, anything after the MIN KEY of key1 => "key2"@200, "key2"@100, "key3"@50
+
+        Example 3: Upper bound with Bound::Included("key2") (MVCC scan) => Bound::Included(KeySlice::from_slice(x, TS_RANGE_END)) => Bound::Included("key2"@0)
+            so we'd like to have until all key2, so the possible end of key2 would be key2@0
+
+        Example 4: Upper bound with Bound::Excluded("key2") => Bound::Excluded(KeySlice::from_slice(x, TS_RANGE_BEGIN)) => Bound::Excluded("key2@MAX")
+            so we'd like to exclude all keys, so the possible start of key2 would be key2@MAX
+
+        NOTE: ts is only for lower_bound
+
+    */
+    (
+        match lower {
+            Bound::Included(x) => Bound::Included(KeySlice::from_slice(x, ts)),
+            Bound::Excluded(x) => Bound::Excluded(KeySlice::from_slice(x, TS_RANGE_END)),
+            Bound::Unbounded => Bound::Unbounded,
+        },
+        match upper {
+            Bound::Included(x) => Bound::Included(KeySlice::from_slice(x, TS_RANGE_END)),
+            Bound::Excluded(x) => Bound::Excluded(KeySlice::from_slice(x, TS_RANGE_BEGIN)),
+            Bound::Unbounded => Bound::Unbounded,
+        },
+    )
 }
 
 /// Create a bound of `KeyBytes` from a bound of `KeySlice`.
@@ -130,8 +169,8 @@ impl MemTable {
         // not need to consider the bound exclude/include logic. Simply provide `DEFAULT_TS` as the
         // timestamp for the key-ts pair.
         self.scan(
-            map_bound_plus_ts(lower, TS_DEFAULT),
-            map_bound_plus_ts(upper, TS_DEFAULT),
+            lower.map(|x| KeySlice::from_slice(x, TS_DEFAULT)),
+            upper.map(|x| KeySlice::from_slice(x, TS_DEFAULT)),
         )
     }
 
