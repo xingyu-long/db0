@@ -67,14 +67,15 @@ impl SsTableBuilder {
         if self.first_key.is_empty() {
             self.first_key.set_from_slice(key);
         }
+
+        if key.ts() > self.max_ts {
+            self.max_ts = key.ts();
+        }
+
         if self.builder.add(key, value) {
             self.key_hashes.push(farmhash::fingerprint32(key.key_ref()));
             self.last_key.set_from_slice(key);
             return;
-        }
-
-        if key.ts() > self.max_ts {
-            self.max_ts = key.ts();
         }
 
         self.finish_block();
