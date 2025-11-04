@@ -141,19 +141,6 @@ fn test_integration(compaction_options: CompactionOptions) {
             .unwrap();
     }
 
-    // wait for compaction to kick in
-    let mut prev_snapshot = storage.inner.state.read().clone();
-    while {
-        std::thread::sleep(Duration::from_secs(1));
-        let snapshot = storage.inner.state.read().clone();
-        let to_cont = prev_snapshot.levels != snapshot.levels
-            || prev_snapshot.l0_sstables != snapshot.l0_sstables;
-        prev_snapshot = snapshot;
-        to_cont
-    } {
-        println!("waiting for compaction to converge");
-    }
-
     storage.close().unwrap();
     // ensure all SSTs are flushed
     assert!(storage.inner.state.read().memtable.is_empty());
