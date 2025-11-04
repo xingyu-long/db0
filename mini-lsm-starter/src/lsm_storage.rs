@@ -38,7 +38,7 @@ use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::key::{KeySlice, TS_RANGE_BEGIN, TS_RANGE_END};
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::{Manifest, ManifestRecord};
-use crate::mem_table::{MemTable, map_bound, map_bound_plus_ts};
+use crate::mem_table::{MemTable, map_bound, map_key_bound_plus_ts};
 use crate::mvcc::LsmMvccInner;
 use crate::mvcc::txn::{Transaction, TxnIterator};
 use crate::table::{FileObject, SsTable, SsTableBuilder, SsTableIterator};
@@ -811,20 +811,15 @@ impl LsmStorageInner {
             let guard = self.state.read();
             Arc::clone(&guard)
         };
+
+        let (lower_bound, upper_bound) = map_key_bound_plus_ts(_lower, _upper, read_ts);
+
         let mut mem_iters = Vec::new();
-
-        let mem_iter = snapshot.memtable.scan(
-            map_bound_plus_ts(_lower, TS_RANGE_BEGIN),
-            map_bound_plus_ts(_upper, TS_RANGE_END),
-        );
-
+        let mem_iter = snapshot.memtable.scan(lower_bound, upper_bound);
         mem_iters.push(Box::new(mem_iter));
 
         for table in snapshot.imm_memtables.iter() {
-            mem_iters.push(Box::new(table.scan(
-                map_bound_plus_ts(_lower, TS_RANGE_BEGIN),
-                map_bound_plus_ts(_upper, TS_RANGE_END),
-            )));
+            mem_iters.push(Box::new(table.scan(lower_bound, upper_bound)));
         }
 
         let mut l0_sst_iters = Vec::with_capacity(snapshot.l0_sstables.len());
