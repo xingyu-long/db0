@@ -169,7 +169,6 @@ impl LsmStorageInner {
                d@2=2   <- can be removed
             */
 
-
             // TODO(xingyu): this is smart!!! need to revisit here later
             if !is_same_key {
                 first_key_below_watermark = true;
