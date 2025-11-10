@@ -18,7 +18,10 @@
 use std::{
     collections::HashSet,
     ops::Bound,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use anyhow::Result;
@@ -46,7 +49,7 @@ pub struct Transaction {
 
 impl Transaction {
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        if self.committed.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.committed.load(Ordering::SeqCst) {
             panic!("already committed!");
         }
         // check the local_storage first
@@ -62,7 +65,7 @@ impl Transaction {
     }
 
     pub fn scan(self: &Arc<Self>, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> Result<TxnIterator> {
-        if self.committed.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.committed.load(Ordering::SeqCst) {
             panic!("already committed!");
         }
         // get the TxnLocalIterator from local_storage
@@ -87,7 +90,7 @@ impl Transaction {
     }
 
     pub fn put(&self, key: &[u8], value: &[u8]) {
-        if self.committed.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.committed.load(Ordering::SeqCst) {
             panic!("already committed!");
         }
         self.local_storage
@@ -95,7 +98,7 @@ impl Transaction {
     }
 
     pub fn delete(&self, key: &[u8]) {
-        if self.committed.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.committed.load(Ordering::SeqCst) {
             panic!("already committed!");
         }
         self.local_storage
@@ -103,23 +106,22 @@ impl Transaction {
     }
 
     pub fn commit(&self) -> Result<()> {
-        if !self.committed.load(std::sync::atomic::Ordering::Relaxed) {
-            self.committed
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            // critical section
-            let mut records = Vec::new();
-            for entry in self.local_storage.iter() {
-                if entry.value().is_empty() {
-                    records.push(WriteBatchRecord::Del(entry.key().clone()));
-                } else {
-                    records.push(WriteBatchRecord::Put(
-                        entry.key().clone(),
-                        entry.value().clone(),
-                    ));
-                }
+        self.committed
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .expect("cannot operate on committed txn!");
+        // critical section
+        let mut records = Vec::new();
+        for entry in self.local_storage.iter() {
+            if entry.value().is_empty() {
+                records.push(WriteBatchRecord::Del(entry.key().clone()));
+            } else {
+                records.push(WriteBatchRecord::Put(
+                    entry.key().clone(),
+                    entry.value().clone(),
+                ));
             }
-            self.inner.write_batch(&records)?;
         }
+        self.inner.write_batch(&records)?;
         Ok(())
     }
 }
