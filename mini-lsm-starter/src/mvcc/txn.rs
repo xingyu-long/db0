@@ -184,6 +184,16 @@ impl Transaction {
 
             // ensure this is no same committed ts entry
             assert!(old_data.is_none());
+
+            // remove txns below the watermark
+            let watermark = self.inner.mvcc().watermark();
+            while let Some(entry) = committed_txns.first_entry() {
+                if *entry.key() < watermark {
+                    entry.remove();
+                } else {
+                    break;
+                }
+            }
         }
         Ok(())
     }
