@@ -153,21 +153,21 @@ impl Transaction {
             serializable = false;
         }
 
-        if serializable {
-            // critical section
-            let mut records = Vec::new();
-            for entry in self.local_storage.iter() {
-                if entry.value().is_empty() {
-                    records.push(WriteBatchRecord::Del(entry.key().clone()));
-                } else {
-                    records.push(WriteBatchRecord::Put(
-                        entry.key().clone(),
-                        entry.value().clone(),
-                    ));
-                }
+        // critical section
+        let mut records = Vec::new();
+        for entry in self.local_storage.iter() {
+            if entry.value().is_empty() {
+                records.push(WriteBatchRecord::Del(entry.key().clone()));
+            } else {
+                records.push(WriteBatchRecord::Put(
+                    entry.key().clone(),
+                    entry.value().clone(),
+                ));
             }
-            let ts = self.inner.write_batch_inner(&records)?;
+        }
+        let ts = self.inner.write_batch_inner(&records)?;
 
+        if serializable {
             // add this txn into committed_txns
             let mut committed_txns = self.inner.mvcc().committed_txns.lock();
             let mut key_hashes = self.key_hashes.as_ref().unwrap().lock();
