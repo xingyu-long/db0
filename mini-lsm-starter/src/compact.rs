@@ -35,7 +35,7 @@ use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::key::KeySlice;
-use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
+use crate::lsm_storage::{CompactionFilter, LsmStorageInner, LsmStorageState};
 use crate::manifest::ManifestRecord;
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
@@ -143,7 +143,8 @@ impl LsmStorageInner {
         let watermark = self.mvcc().watermark();
         let mut first_key_below_watermark = false;
 
-        while iter.is_valid() {
+        let filters = self.compaction_filters.lock();
+        'outer: while iter.is_valid() {
             if builder.is_none() {
                 builder = Some(SsTableBuilder::new(self.options.block_size));
             }
@@ -186,13 +187,26 @@ impl LsmStorageInner {
                 continue;
             }
 
-            if is_same_key && iter.key().ts() <= watermark {
+            if iter.key().ts() <= watermark {
                 // we deal the case for the first key is less or equal to watermark
-                if !first_key_below_watermark {
+                if is_same_key && !first_key_below_watermark {
                     iter.next()?;
                     continue;
                 }
                 first_key_below_watermark = false;
+
+                // use compaction_filter
+                for prefix in filters.iter() {
+                    match prefix {
+                        CompactionFilter::Prefix(data) => {
+                            if iter.key().key_ref().starts_with(data) {
+                                iter.next()?;
+                                // let the outer loop to handle iter.is_valid()
+                                continue 'outer;
+                            }
+                        }
+                    }
+                }
             }
 
             builder_inner.add(iter.key(), iter.value());
