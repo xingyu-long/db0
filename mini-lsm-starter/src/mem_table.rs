@@ -176,17 +176,11 @@ impl MemTable {
 
     /// Get a value by key.
     pub fn get(&self, _key: KeySlice) -> Option<Bytes> {
-        // use clone to have new owned data instead of reference
-        // Some(self.map.get(_key).unwrap().value().clone())
-        //
-        // TODO(xingyu): ? ensure Slice won't free this memory.
+        // convert slice data to static, so this _key would live all the time.
         let key_bytes = Bytes::from_static(unsafe { std::mem::transmute(_key.key_ref()) });
         self.map
             .get(&KeyBytes::from_bytes_with_ts(key_bytes, _key.ts()))
             .map(|e| e.value().clone())
-        // self.map
-        //     .get(&_key.to_key_vec().into_key_bytes())
-        //     .map(|e| e.value().clone())
     }
 
     /// Put a key-value pair into the mem-table.
