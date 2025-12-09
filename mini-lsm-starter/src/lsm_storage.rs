@@ -752,7 +752,8 @@ impl LsmStorageInner {
 
             snapshot.imm_memtables.insert(0, old_memtable);
 
-            // TODO(xingyu): do we need to reset approximate_size???
+            // Q: do we need to reset approximate_size???
+            // A: this memtable input was init with default vaue, so it has reset.
             // update the snapshot
             *guard = Arc::new(snapshot)
         }

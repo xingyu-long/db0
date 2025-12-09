@@ -108,6 +108,8 @@ impl Bloom {
         for h in keys.iter() {
             let mut h = *h;
             // why do we need this?
+            // use this to generate hash values by reusing same hash function
+            // plus some delta values.
             let delta = (h >> 17) | (h << 15);
             for _ in 0..k {
                 let index = (h as usize) % nbits;
